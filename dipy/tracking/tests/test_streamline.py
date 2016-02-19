@@ -20,7 +20,8 @@ from dipy.tracking.streamline import (set_number_of_points,
                                       compress_streamlines,
                                       select_by_rois,
                                       orient_by_rois,
-                                      values_from_volume)
+                                      values_from_volume,
+                                      length_filter)
 
 
 streamline = np.array([[82.20181274,  91.36505890,  43.15737152],
@@ -886,6 +887,29 @@ def test_values_from_volume():
     data4D = np.ones((2, 2, 2, 2))
     streamlines = np.ones((10, 1, 3))
     npt.assert_equal(values_from_volume(data4D, streamlines).shape, (10, 1, 2))
+
+
+def test_length_filter():
+    # Empty pass
+    npt.assert_equal(streamlines, length_filter(streamlines))
+
+    # min_length
+    npt.assert_equal(streamlines, length_filter(streamlines, min_length=1))
+    npt.assert_equal(len(length_filter(streamlines, min_length=100)), 0)
+
+    # max_length
+    npt.assert_equal(streamlines, length_filter(streamlines, max_length=100))
+    npt.assert_equal(len(length_filter(streamlines, max_length=1)), 0)
+
+    # max_streamlines
+    npt.assert_equal(streamlines, length_filter(streamlines,
+                                                max_streamlines=100))
+    npt.assert_equal(len(length_filter(streamlines, max_streamlines=1)), 1)
+
+    # num_points
+    npt.assert_equal(streamlines, length_filter(streamlines, num_points=0))
+    for s in length_filter(streamlines, num_points=20):
+        npt.assert_equal(len(s), 20)
 
 
 if __name__ == '__main__':

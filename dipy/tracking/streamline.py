@@ -6,6 +6,7 @@ from scipy.spatial.distance import cdist
 import numpy as np
 from nibabel.affines import apply_affine
 
+from dipy.tracking.metrics import downsample
 from dipy.tracking.streamlinespeed import set_number_of_points
 from dipy.tracking.streamlinespeed import length
 from dipy.tracking.streamlinespeed import compress_streamlines
@@ -463,3 +464,58 @@ def values_from_volume(data, streamlines, affine=None):
         return _extract_vals(data, streamlines, affine=affine)
     else:
         raise ValueError("Data needs to have 3 or 4 dimensions")
+
+
+def length_filter(streamlines, min_length=0, max_length=0, max_streamlines=0,
+                  num_points=0):
+    """
+    Filters out streamlines based on their length
+
+    Parameters
+    ----------
+    streamlines: ndarray or list
+        If array, of shape (num_streamlines, num_points, 3).
+        If list, len(num_streamlines) with (num_points, 3) array elements.
+    min_length: float
+        Minimum length of streamlines.
+        Default: 0.
+    max_length: float
+        Maximum length of streamlines.
+        Default: Infinite.
+    max_streamlines: int
+        Maximum number of streamlines to output.
+        Default: Infinite.
+    num_points: int
+        Number of points per streamline in the output.
+        Default: No upsampling/downsampling.
+
+    Return
+    ------
+    array or list (based on input):
+        Subsampled streamlines.
+    """
+
+    num_streamlines = len(streamlines)
+    indices = range(num_streamlines)
+    results = []
+
+    # If we have more streamlines than needed, randomly extract a subset.
+    if num_streamlines > max_streamlines > 0:
+        indices = np.random.permutation(indices)[:max_streamlines]
+
+    for i in indices:
+        streamline = streamlines[i]
+        streamline_length = length(streamline)
+
+        if (streamline_length >= min_length and
+                (max_length <= 0 or streamline_length <= max_length)):
+            if num_points:
+                results.append(downsample(streamline, num_points))
+            else:
+                results.append(streamline)
+
+    # Return in the same type as the input.
+    if isinstance(streamlines, np.ndarray):
+        return np.array(results)
+    else:
+        return results
