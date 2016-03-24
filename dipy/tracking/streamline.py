@@ -13,6 +13,7 @@ import dipy.tracking.utils as ut
 from dipy.tracking.utils import streamline_near_roi
 from dipy.core.geometry import dist_to_corner
 import dipy.align.vector_fields as vfu
+from dipy.segment.quickbundles import QuickBundles
 
 
 def unlist_streamlines(streamlines):
@@ -463,3 +464,142 @@ def values_from_volume(data, streamlines, affine=None):
         return _extract_vals(data, streamlines, affine=affine)
     else:
         raise ValueError("Data needs to have 3 or 4 dimensions")
+
+
+def flip_to_source(streamlines, source=np.array([0, 0, 0])):
+    """
+    Flip streamlines so that their first point is close to source point.
+
+    Parameters
+    ----------
+    streamlines: list
+        List of ndarrays (N, 3)
+
+    source: ndarray
+        Point, shape (3,)
+
+    Returns
+    -------
+    Flipped_streamlines: List of ndarrays (N, 3)
+    """
+
+    flipped_streamlines = []
+    for streamline in streamlines:
+        distance_to_first_point = np.sum((streamline[0] - source) ** 2)
+        distance_to_second_point = np.sum((streamline[-1] - source) ** 2)
+
+        if distance_to_first_point > distance_to_second_point:
+            flipped_streamlines.append(streamline[::-1])
+        else:
+            flipped_streamlines.append(streamline)
+
+    return flipped_streamlines
+
+
+def extract_centroid(streamlines, num_points=20, distance_threshold=200.):
+    """
+    Extracts a centroid from a group of streamlines using the given distance
+    threshold.
+
+    Parameters
+    ----------
+    streamlines: ndarray or list
+        Sequence of (N,3) ... (M,3) arrays,
+
+    num_points: int
+        Number of points required for the centroid streamline.
+
+    distance_threshold: float
+        Maximum distance between two streamlines of this group (in mm).
+        If this distance is too small, more than 1 centroid could be produced,
+        in which case the user is warned and the first one is returned.
+
+    Return
+    ------
+    The centroid streamline (list of 3D points).
+    """
+
+    qb = QuickBundles(streamlines, dist_thr=distance_threshold, pts=num_points)
+    centroid = qb.centroids
+
+    if len(centroid) > 1:
+        warn("More than one centroid returned by QuickBundles.")
+
+    return centroid[0]
+
+
+def assign_to_centroid(streamlines, centroid, shape, num_points=20,
+                       affine=None):
+    """
+    Assigns each point of every streamlines to the closest of the centroid
+    points and returns an assignment map volume.
+
+    Parameters
+    ----------
+    streamlines: ndarray or list
+        Sequence of (N,3) ... (M,3) arrays,
+
+    centroid: ndarray or list
+        Centroid streamline (list of 3D points).
+
+    shape: 3D tuple
+        Shape of the volume to return.
+
+    num_points: int
+        Number of points per streamline.
+
+    affine: 4x4 ndarray
+        Transformation matrix.
+
+    Return
+    ------
+    The centroid streamline (list of 3D points).
+    """
+
+    streamlines = flip_to_source(streamlines, source=centroid[0])
+
+    if affine is not None:
+        streamlines = transform_streamlines(streamlines, np.linalg.inv(affine))
+        centroid = transform_streamlines([centroid], np.linalg.inv(affine))[0]
+
+    points, _ = unlist_streamlines(streamlines)
+    centroid = set_number_of_points([centroid], num_points)[0]
+    volume = np.zeros(shape[:3], dtype=np.int32)
+
+    for p in points:
+        distances = np.sqrt(np.sum(np.power(p[None, :] - centroid, 2), axis=1))
+        volume[tuple(np.round(p).astype(np.int))] = np.argmin(distances) + 1
+
+    return volume
+
+
+def extract_tract_profile(data, assignment_map):
+    """
+    Extracts a tract profile using an assignment map.
+
+    Parameters
+    ----------
+    data: 3D ndarray
+        Whole-brain data (e.g. FA map).
+
+    assignment_map: 3D ndarray of ints
+        See assign_to_centroid().
+
+    Return
+    ------
+    2 Ndarray of size (# of non-zero unique values of assignment_map).
+    A tract profile averaging values from data along the streamlines,
+    and another one containing the standard deviation.
+    """
+
+    num_points = np.max(assignment_map)
+    mean = np.zeros(num_points)
+    std = np.zeros(num_points)
+
+    for i in range(num_points + 1):
+        current_map = assignment_map == i
+        mean[i-1] = np.average(data, weights=current_map)
+        std[i-1] = np.sqrt(np.average((data - mean[i-1]) ** 2,
+                                      weights=current_map))
+
+    return mean, std
